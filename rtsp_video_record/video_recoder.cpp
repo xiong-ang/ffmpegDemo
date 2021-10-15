@@ -53,22 +53,24 @@ bool VideoRecoder::StartHandle()
     if (ret != 0)
     {
         av_log(NULL, AV_LOG_ERROR, "Can't open rtsp capture\n");
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        return false;
     }
 
     ret = avformat_find_stream_info(i_fmt_ctx, NULL);
     if (ret < 0)
     {
         av_log(NULL, AV_LOG_ERROR, "Failed to retrieve input stream information\n");
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        return false;
     }
 
     int i_video_stream_index = av_find_best_stream(i_fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     if (i_video_stream_index < 0)
     {
         av_log(NULL, AV_LOG_ERROR, "Can't find video stream in input file\n");
-        ret = AVERROR_UNKNOWN;
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        return false;
     }
     i_video_stream = i_fmt_ctx->streams[i_video_stream_index];
     /*
@@ -92,9 +94,15 @@ bool VideoRecoder::StartHandle()
     if (ret < 0 || !o_fmt_ctx)
     {
         av_log(NULL, AV_LOG_ERROR, "Could not create output context\n");
-        ret = AVERROR_UNKNOWN;
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        av_free(o_fmt_ctx);
+        return false;
     }
+
+    o_fmt_ctx->probesize = 10000000;
+	o_fmt_ctx->flags |= AVFMT_FLAG_NOBUFFER;
+	av_opt_set(o_fmt_ctx->priv_data,"preset","ultrafast",0);
+	o_fmt_ctx->max_analyze_duration = 5 * AV_TIME_BASE;
 
     /*
     * since all input files are supposed to be identical (framerate, dimension, color format, ...)
@@ -104,8 +112,9 @@ bool VideoRecoder::StartHandle()
     if (!o_video_stream)
     {
         av_log(NULL, AV_LOG_ERROR, "Failed allocating output stream.\n");
-        ret = AVERROR_UNKNOWN;
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        av_free(o_fmt_ctx);
+        return false;
     }
     {
         AVCodecContext *c;
@@ -133,14 +142,24 @@ bool VideoRecoder::StartHandle()
     if (ret < 0)
     {
         av_log(NULL, AV_LOG_ERROR, "Could not open output file\n");
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        av_free(o_fmt_ctx);
+        avcodec_close(o_fmt_ctx->streams[0]->codec);
+        av_freep(&o_fmt_ctx->streams[0]->codec);
+        av_freep(&o_fmt_ctx->streams[0]);
+        return false;
     }
 
     ret = avformat_write_header(o_fmt_ctx, NULL);
     if (ret < 0)
     {
         av_log(NULL, AV_LOG_ERROR, "Could not open output file\n");
-        goto end;
+        avformat_close_input(&i_fmt_ctx);
+        av_free(o_fmt_ctx);
+        avcodec_close(o_fmt_ctx->streams[0]->codec);
+        av_freep(&o_fmt_ctx->streams[0]->codec);
+        av_freep(&o_fmt_ctx->streams[0]);
+        return false;
     }
 
     int64_t last_pts = 0;
@@ -181,7 +200,6 @@ bool VideoRecoder::StartHandle()
     last_dts += dts;
     last_pts += pts;
 
-end:
     avformat_close_input(&i_fmt_ctx);
 
     av_write_trailer(o_fmt_ctx);
@@ -192,11 +210,5 @@ end:
 
     avio_close(o_fmt_ctx->pb);
     av_free(o_fmt_ctx);
-    if (ret < 0 && ret != AVERROR_EOF)
-    {
-        av_log(NULL, AV_LOG_ERROR, "Error occured.\n");
-        return false;
-    }
-
     return true;
 }
