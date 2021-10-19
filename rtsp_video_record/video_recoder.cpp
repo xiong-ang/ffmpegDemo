@@ -13,11 +13,6 @@ extern "C"
 #include <libavutil/mathematics.h>
 #include <libavutil/samplefmt.h>
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-
 #ifdef __cplusplus
 }
 #endif
@@ -49,7 +44,13 @@ bool VideoRecoder::StartHandle()
 
     /* should set to NULL so that avformat_open_input() allocate a new one */
     i_fmt_ctx = NULL;
-    int ret = avformat_open_input(&i_fmt_ctx, _rtsp_url.c_str(), NULL, NULL);
+
+    AVDictionary *options = NULL;
+    av_dict_set(&options, "buffer_size", "1024000", 0); //设置缓存大小,1080p可将值跳到最大
+    av_dict_set(&options, "rtsp_transport", "tcp", 0);  //以tcp的方式打开,
+    av_dict_set(&options, "stimeout", "5000000", 0);    //设置超时断开链接时间，单位us
+    av_dict_set(&options, "max_delay", "500000", 0);    //设置最大时延
+    int ret = avformat_open_input(&i_fmt_ctx, _rtsp_url.c_str(), NULL, &options);
     if (ret != 0)
     {
         av_log(NULL, AV_LOG_ERROR, "Can't open rtsp capture\n");
@@ -100,9 +101,9 @@ bool VideoRecoder::StartHandle()
     }
 
     o_fmt_ctx->probesize = 10000000;
-	o_fmt_ctx->flags |= AVFMT_FLAG_NOBUFFER;
-	av_opt_set(o_fmt_ctx->priv_data,"preset","ultrafast",0);
-	o_fmt_ctx->max_analyze_duration = 5 * AV_TIME_BASE;
+    o_fmt_ctx->flags |= AVFMT_FLAG_NOBUFFER;
+    av_opt_set(o_fmt_ctx->priv_data, "preset", "ultrafast", 0);
+    o_fmt_ctx->max_analyze_duration = 5 * AV_TIME_BASE;
 
     /*
     * since all input files are supposed to be identical (framerate, dimension, color format, ...)
